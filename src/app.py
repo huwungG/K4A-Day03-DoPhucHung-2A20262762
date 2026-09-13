@@ -25,7 +25,9 @@ from prompts import (
 )
 from providers import get_llm_provider
 
-load_dotenv()
+# override=True để .env LUÔN thắng các env var đã được set trước đó trong shell session
+# (tránh tình trạng PowerShell giữ env var cũ như LLM_PROVIDER từ lần chạy trước)
+load_dotenv(override=True)
 
 def load_test_cases():
     """Tải danh sách 5 test cases từ config/test_cases.json hoặc config/test_cases.example.json"""
@@ -64,26 +66,31 @@ def run_baseline_chatbot(user_query: str, provider):
 def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) -> list:
     """
     [REACT AGENT LOOP] Thực thi vòng lặp Thought -> Action -> Observation với MCP Server
+    Hỗ trợ multi-step reasoning: sau mỗi Observation, LLM được gọi lại với context
+    mới (câu hỏi gốc + observation) để quyết định bước tiếp theo.
     Trả về danh sách trace log của phiên thực thi.
     """
     print(f"\n🤖 [REACT AGENT] Câu hỏi: {user_query}")
-    
+
     step = 0
     trace_logs = []
     tools_list = mcp_server.list_tools()
-    
+
+    # Prompt tích lũy: ban đầu là user query, sau mỗi step sẽ được bổ sung Observation
+    accumulated_prompt = user_query
+
     while step < MAX_ITERATIONS:
         step += 1
         step_start_time = time.time()
         print(f"\n--- 🔄 Vòng lặp ReAct Loop (Step {step}/{MAX_ITERATIONS}) ---")
-        
+
         # Gọi LLM với Native Tool Calling Specs
-        llm_response = provider.generate_with_tools(user_query, tools_list, system_prompt=REACT_AGENT_SYSTEM_PROMPT)
+        llm_response = provider.generate_with_tools(accumulated_prompt, tools_list, system_prompt=REACT_AGENT_SYSTEM_PROMPT)
         latency_ms = round((time.time() - step_start_time) * 1000, 2)
-        
+
         thought = llm_response.get("thought", "Đang suy luận...")
         print(f"🧠 [Thought]: {thought}")
-        
+
         # Trường hợp 1: LLM quyết định trả lời bằng văn bản trực tiếp
         if llm_response.get("type") == "text":
             final_content = llm_response.get("content", "")
@@ -97,44 +104,37 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
                 "latency_ms": latency_ms
             })
             break
-            
+
         # Trường hợp 2: LLM đề xuất gọi Tool (Action)
         elif llm_response.get("type") == "tool_call":
             tool_name = llm_response.get("tool_name")
             arguments = llm_response.get("arguments", {})
-            
+
             print(f"🛠️ [Action Proposed]: {tool_name}({arguments})")
-            
+
             # Thực thi Tool qua MCP Server
             mcp_result = mcp_server.call_tool(tool_name, arguments)
             obs_data = mcp_result.get("result", {})
-            
+            obs_str = json.dumps(obs_data, ensure_ascii=False)
+
             if not obs_data:
                 print(f"👁️ [Observation từ MCP Server]: {{}}")
                 print(f"⚠️ [CHÚ Ý]: MCP Server trả về kết quả rỗng! Học viên cần hoàn thành TODO 2.1 trong 'src/mcp_server.py'.")
                 final_answer = "Chưa thể trả lời chi tiết do chưa nhận được dữ liệu từ MCP Server (hãy hoàn thành TODO 2.1)."
-            else:
-                obs_str = json.dumps(obs_data, ensure_ascii=False)
-                print(f"👁️ [Observation từ MCP Server]: {obs_str}")
-                
-                # Tổng hợp Final Answer từ kết quả Observation thực tế
-                if obs_data.get("status") == "SUCCESS":
-                    if "data" in obs_data:
-                        d = obs_data["data"]
-                        final_answer = (
-                            f"Kết quả tra cứu cho sinh viên {obs_data.get('student_id', '')} ({d.get('full_name', '')}): "
-                            f"Lớp {d.get('class', '')}, GPA: {d.get('gpa', '')}, Email: {d.get('email', '')}, "
-                            f"Trạng thái: {d.get('status', '')}, Cố vấn: {d.get('advisor', '')}."
-                        )
-                    elif "message" in obs_data:
-                        final_answer = obs_data["message"]
-                    else:
-                        final_answer = f"Đã hoàn tất xử lý qua MCP Server: {json.dumps(obs_data, ensure_ascii=False)}"
-                elif obs_data.get("status") == "NOT_FOUND":
-                    final_answer = obs_data.get("message", "Không tìm thấy thông tin sinh viên yêu cầu.")
-                else:
-                    final_answer = f"Phản hồi từ công cụ: {json.dumps(obs_data, ensure_ascii=False)}"
-            
+                print(f"🏁 [Final Answer]: {final_answer}")
+                trace_logs.append({
+                    "step": step,
+                    "query": user_query,
+                    "action_type": "FINAL_ANSWER",
+                    "thought": "MCP Server trả về rỗng.",
+                    "output": final_answer,
+                    "latency_ms": latency_ms
+                })
+                break
+
+            print(f"👁️ [Observation từ MCP Server]: {obs_str}")
+
+            # Ghi nhận trace cho Tool Execution
             trace_logs.append({
                 "step": step,
                 "query": user_query,
@@ -144,20 +144,116 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
                 "observation": obs_data,
                 "latency_ms": latency_ms
             })
-            
-            # Kết thúc vòng lặp sau khi hoàn tất Observation và xuất Final Answer
-            print(f"🧠 [Thought]: Đã nhận được dữ liệu từ MCP Server. Tổng hợp kết quả phản hồi.")
-            print(f"🏁 [Final Answer]: {final_answer}")
-            
-            trace_logs.append({
-                "step": step + 1,
-                "query": user_query,
-                "action_type": "FINAL_ANSWER",
-                "thought": "Tổng hợp kết quả từ MCP Server thành công.",
-                "output": final_answer,
-                "latency_ms": 10.0
-            })
-            break
+
+            # === Multi-step logic ===
+            # Nếu Tool trả về INSUFFICIENT_BALANCE → dừng và trả lời text ngay
+            if obs_data.get("status") == "INSUFFICIENT_BALANCE":
+                final_answer = obs_data.get("message", "So ngay phep khong du.")
+                print(f"🏁 [Final Answer]: {final_answer}")
+                trace_logs.append({
+                    "step": step + 1,
+                    "query": user_query,
+                    "action_type": "FINAL_ANSWER",
+                    "thought": "MCP Server trả về INSUFFICIENT_BALANCE → dừng multi-step.",
+                    "output": final_answer,
+                    "latency_ms": 5.0
+                })
+                break
+
+            # Nếu Tool là leave_request_create (cuối cùng của quy trình) → tổng hợp & dừng
+            if tool_name == "leave_request_create" and obs_data.get("status") == "SUCCESS":
+                final_answer = (
+                    f"Da tao don nghi phep thanh cong cho nhan vien {obs_data.get('employee_id', '')}: "
+                    f"Ma don: {obs_data.get('request_id', '')} | "
+                    f"Ngay bat dau: {obs_data.get('start_date', '')} | "
+                    f"So ngay: {obs_data.get('end_days', '')} | "
+                    f"Phep con lai sau don: {obs_data.get('remaining_after', '')} ngay."
+                )
+                print(f"🏁 [Final Answer]: {final_answer}")
+                trace_logs.append({
+                    "step": step + 1,
+                    "query": user_query,
+                    "action_type": "FINAL_ANSWER",
+                    "thought": "Tổng hợp kết quả từ leave_request_create.",
+                    "output": final_answer,
+                    "latency_ms": 5.0
+                })
+                break
+
+            # Nếu Tool là leave_balance_query (single_step_query — TC02) → tổng hợp & dừng
+            # Chỉ tổng hợp luôn khi user không có ý định tạo đơn (không có keyword nghỉ phép)
+            import re as _re
+            _user_q_lower = user_query.lower()
+            # Normalize tiếng Việt có dấu → không dấu
+            _diac = str.maketrans(
+                "áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ",
+                "aaaaaaaaaaaaaaaaaeeeeeeeeeeiiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd"
+            )
+            _user_q_ascii = _user_q_lower.translate(_diac)
+            _is_leave_intent = any(
+                kw in _user_q_ascii for kw in ["nghi phep", "tao don", "xin nghi", "xin phep", "toi muon nghi"]
+            )
+            if tool_name == "leave_balance_query" and obs_data.get("status") == "SUCCESS" and not _is_leave_intent:
+                d = obs_data.get("data", {})
+                final_answer = (
+                    f"Thong tin ngay phep cua nhan vien {obs_data.get('employee_id', '')} "
+                    f"({d.get('full_name', '')}): "
+                    f"So ngay phep con lai trong nam: {d.get('remaining_leave_days', '')} ngay."
+                )
+                print(f"🏁 [Final Answer]: {final_answer}")
+                trace_logs.append({
+                    "step": step + 1,
+                    "query": user_query,
+                    "action_type": "FINAL_ANSWER",
+                    "thought": "Tổng hợp kết quả từ leave_balance_query.",
+                    "output": final_answer,
+                    "latency_ms": 5.0
+                })
+                break
+
+            # Nếu Tool là insurance_policy_lookup (TC03) → tổng hợp & dừng
+            if tool_name == "insurance_policy_lookup" and obs_data.get("status") == "SUCCESS":
+                d = obs_data.get("data", {})
+                pol = d.get("insurance_policy", {})
+                final_answer = (
+                    f"Chinh sach bao hiem cua nhan vien {obs_data.get('employee_id', '')} "
+                    f"({d.get('full_name', '')}): "
+                    f"Goi: {pol.get('policy_name', '')} | "
+                    f"Nha cung cap: {pol.get('provider', '')} | "
+                    f"Quyen loi: {pol.get('coverage', '')}."
+                )
+                print(f"🏁 [Final Answer]: {final_answer}")
+                trace_logs.append({
+                    "step": step + 1,
+                    "query": user_query,
+                    "action_type": "FINAL_ANSWER",
+                    "thought": "Tổng hợp kết quả từ insurance_policy_lookup.",
+                    "output": final_answer,
+                    "latency_ms": 5.0
+                })
+                break
+
+            # Các trường hợp khác (leave_balance_query, insurance_policy_lookup, NOT_FOUND) →
+            # bổ sung Observation vào prompt và cho LLM quyết định bước tiếp theo (multi-step)
+            accumulated_prompt = (
+                f"{user_query}\n\n"
+                f"[Observation từ tool '{tool_name}']: {obs_str}"
+            )
+            # Nếu là NOT_FOUND → agent có thể trả lời luôn ở step tiếp theo, không cần loop quá nhiều
+            if obs_data.get("status") == "NOT_FOUND":
+                final_answer = obs_data.get("message", "Khong tim thay nhan vien yeu cau.")
+                print(f"🏁 [Final Answer]: {final_answer}")
+                trace_logs.append({
+                    "step": step + 1,
+                    "query": user_query,
+                    "action_type": "FINAL_ANSWER",
+                    "thought": "MCP Server trả về NOT_FOUND → dừng.",
+                    "output": final_answer,
+                    "latency_ms": 5.0
+                })
+                break
+            # Tiếp tục vòng lặp để LLM quyết định step tiếp theo
+            continue
 
     return trace_logs
 

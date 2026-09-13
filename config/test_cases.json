@@ -1,0 +1,37 @@
+[
+  {
+    "id": "TC01",
+    "type": "direct_query",
+    "question": "Chào bạn, chính sách nghỉ phép năm của công ty như thế nào?",
+    "expected_behavior": "Chatbot trả lời trực tiếp từ System Prompt, không cần gọi Tool.",
+    "complexity": "Low"
+  },
+  {
+    "id": "TC02",
+    "type": "single_tool_query",
+    "question": "Tôi là nhân viên EMP001, cho tôi biết còn bao nhiêu ngày phép.",
+    "expected_behavior": "Agent gọi tool 'leave_balance_query' với employee_id='EMP001'.",
+    "complexity": "Medium"
+  },
+  {
+    "id": "TC03",
+    "type": "insurance_lookup",
+    "question": "Hợp đồng bảo hiểm sức khỏe của tôi (EMP001) đang được áp dụng theo chính sách nào?",
+    "expected_behavior": "Agent gọi tool 'insurance_policy_lookup' với employee_id='EMP001'.",
+    "complexity": "Medium"
+  },
+  {
+    "id": "TC04",
+    "type": "multi_step_reasoning",
+    "question": "Tôi muốn nghỉ 3 ngày từ 20/09/2026 đến 22/09/2026. Hãy kiểm tra tôi còn đủ phép không và tạo đơn giúp tôi.",
+    "expected_behavior": "Agent: (1) gọi leave_balance_query → (2) kiểm tra đủ phép → (3) gọi leave_request_create.",
+    "complexity": "High"
+  },
+  {
+    "id": "TC05",
+    "type": "edge_case_handling",
+    "question": "Tôi muốn nghỉ 30 ngày từ 01/10/2026. Kiểm tra giúp tôi.",
+    "expected_behavior": "Agent phát hiện số ngày vượt quá phép còn lại, đưa ra phản hồi lịch sự, không bịa đặt dữ liệu.",
+    "complexity": "Medium"
+  }
+]
