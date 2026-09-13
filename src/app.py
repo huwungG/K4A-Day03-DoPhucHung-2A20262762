@@ -275,13 +275,14 @@ if __name__ == "__main__":
     if "--interactive" in sys.argv:
         print("🎮 [INTERACTIVE MODE] Trò chuyện trực tiếp với ReAct Agent:")
         print("💡 Gợi ý câu hỏi thử nghiệm:")
-        print("   - Câu hỏi chung: 'Quy chế học vụ VinUni yêu cầu bao nhiêu tín chỉ?'")
-        print("   - Tra cứu học vụ: 'Hãy tra cứu thông tin học vụ của sinh viên SV2026001'")
-        print("   - Đặt lịch hẹn: 'Đặt lịch hẹn tư vấn cho SV2026001 vào 14:00 ngày 15/09/2026'")
+        print("   - Câu hỏi chung: 'Chính sách nghỉ phép năm của công ty như thế nào?'")
+        print("   - Tra cứu ngày phép: 'Tôi là nhân viên EMP001, cho tôi biết còn bao nhiêu ngày phép.'")
+        print("   - Tra cứu bảo hiểm: 'Hợp đồng bảo hiểm sức khỏe của tôi (EMP001) đang áp dụng theo chính sách nào?'")
+        print("   - Tạo đơn nghỉ phép (multi-step): 'Tôi là EMP001, muốn nghỉ 3 ngày từ 20/09/2026. Hãy kiểm tra và tạo đơn giúp tôi.'")
         print("   - Gõ 'exit' hoặc 'quit' để kết thúc phiên trò chuyện.\n")
         while True:
             try:
-                user_input = input("👤 Sinh viên hỏi: ").strip()
+                user_input = input("👤 Nhân viên hỏi: ").strip()
                 if not user_input or user_input.lower() in ["exit", "quit"]:
                     print("👋 Tạm biệt! Kết thúc phiên trò chuyện.")
                     break

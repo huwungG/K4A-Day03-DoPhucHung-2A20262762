@@ -141,7 +141,7 @@ MOCK_HR_DATABASE = {
 }
 
 
-def execute_academic_query(student_id: str) -> str:
+# def execute_academic_query(student_id: str) -> str:
     """Thực thi tra cứu học vụ theo mã sinh viên"""
     student = MOCK_DATABASE.get(student_id.strip().upper())
     if student:
@@ -157,7 +157,7 @@ def execute_academic_query(student_id: str) -> str:
         }, ensure_ascii=False)
 
 
-def execute_schedule_appointment(student_id: str, datetime_str: str, advisor_name: str = "PGS.TS Nguyễn Văn A") -> str:
+# def execute_schedule_appointment(student_id: str, datetime_str: str, advisor_name: str = "PGS.TS Nguyễn Văn A") -> str:
     """Thực thi đặt lịch hẹn tư vấn học vụ"""
     return json.dumps({
         "status": "SUCCESS",
